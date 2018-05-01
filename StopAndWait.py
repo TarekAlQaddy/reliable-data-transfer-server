@@ -10,7 +10,7 @@ class State(Enum):
 
 saved_clients = {}
 PACKET_SIZE = 30
-HEADER_SIZE = 13
+HEADER_SIZE = 11
 SERVER_PORT_NO = 12345
 PLP = 0.2
 
@@ -29,16 +29,9 @@ def make_socket(port_no):
 def start_listening(main_socket, datagram_size):
     while True:
         data, address = main_socket.recvfrom(datagram_size)
-        if int(data.decode().split('\r')[5]):
-            print('received ACK')
         if data and address:
             main_socket.close()
             handle_received_packet(data, address)
-            # t = threading.Thread(target=handle_received_packet, args=(data, address))
-            # t.start()
-            # pid = os.fork()
-            # if pid == 0:
-            #     handle_received_packet(data, address)
         main_socket = make_socket(SERVER_PORT_NO)
 
 
@@ -55,83 +48,79 @@ def handle_received_packet(data, address):
         }
         current_state = State.WAITING_0
 
-    [headers, body] = data.decode().split('\r\n')
-    [checksum, length, seq_no, pkt_no, is_final, is_ack] = [int(chars) for chars in headers.split('\r')]
+    [headers, body] = data.decode().split('&$')
+    [checksum, seq_no, is_final, is_ack] = [int(chars) for chars in headers.split('&')]
 
     if current_state == State(seq_no):
         ack_pkt = make_ack_packet(seq_no)
         sock = make_socket(SERVER_PORT_NO)
-        sock.sendto(bytes(ack_pkt, 'UTF-8'), (ip_address, port_no))
+        sock.sendto(bytes(ack_pkt, 'UTF-8'), ('197.160.1.236', 12345))
 
         file = open('files/{}'.format(body), 'r')
         file_data = file.read()
-
         file_size = len(file_data)  # assuming ascii
 
         pointer = 0
         sending_seq_no = 0
         pkt_no = 1
         while pointer < file_size:
-            pkt, pointer = make_pkt(file_data, file_size, sending_seq_no, pointer, pkt_no)
-            # print('Sending {}'.format(bytes(pkt)))
-            # print(ip_address)
-            # print(port_no)
+            pkt, pointer = make_pkt(file_data, file_size, sending_seq_no, pointer)
+
             if not lose_the_packet():
-                sock.sendto(bytes(pkt, 'UTF-8'), (ip_address, port_no))
+                sock.sendto(bytes(pkt, 'UTF-8'), ('197.160.1.236', 12345))
             acked = False
             while not acked:
                 try:
                     sock.settimeout(4)
                     ack, addr = sock.recvfrom(PACKET_SIZE)
-                    ack_data = ack.decode().split('\r')
+                    ack_data = ack.decode()
                     print('Pointer now {}'.format(pointer))
                     print('received ack {}'.format(ack_data))
                     if valid_ack(ack_data, sending_seq_no):
                         acked = True
                 except socket.timeout:
                     print('Timeout, Resending packet #{}'.format(pkt_no))
-                    sock.sendto(bytes(pkt, 'UTF-8'), (ip_address, port_no))
+                    sock.sendto(bytes(pkt, 'UTF-8'), ('197.160.1.236', 12345))
 
             sending_seq_no = 0 if sending_seq_no == 1 else 1
             pkt_no = pkt_no + 1
         print('File is successfully sent\n\n')
-        sock.close()
+        # sock.close()
 
 
 def valid_ack(ack_data, seq_no):
-    # TODO int(ack_data[2]) == seq_no and int(ack_data[5]) == 1 and calc_checksum(ack_data) == ack_data[0]
-    return int(ack_data[2]) == seq_no and int(ack_data[5]) == 1
+    ack_data_array = ack_data.split('&')
+    print('checksumsss: {} {}'.format(calc_checksum(ack_data), ack_data_array[0]))
+    return int(ack_data_array[1]) == seq_no and \
+           int(ack_data_array[3]) == 1 and \
+           int(calc_checksum(ack_data)) == int(ack_data_array[0])
+    # return int(ack_data[1]) == seq_no and int(ack_data[3]) == 1
 
 
 def make_ack_packet(seq_no):
-    checksum = 1
-    pkt_no = is_final = length = 0
+    is_final = 0
     is_ack = 1
-    headers = '{}\r{}\r{}\r{}\r{}\r{}\r\n'.format(checksum, length, seq_no, pkt_no, is_final, is_ack)
+    checksum = calc_checksum('{}&{}&{}&{}&$'.format(255, seq_no, is_final, is_ack))
+    print('ack checksum {}'.format(checksum))
+    headers = '{}&{}&{}&{}&$'.format(checksum, seq_no, is_final, is_ack)
     return headers
 
 
-def make_pkt(data, size, seq_no, pointer, pkt_no):
-
-    checksum = 255
-    headers_without_length = '{}\r{}\r{}\r{}\r{}\r\n'.format(checksum, seq_no, pkt_no, 0, 0)
-    headers_size = len(headers_without_length)
-    headers_size += len(str(headers_size))
+def make_pkt(data, size, seq_no, pointer):
     is_final = 0
-    if size - pointer > PACKET_SIZE - headers_size:
-        body = data[pointer: pointer + PACKET_SIZE - headers_size]
+    if size - pointer > PACKET_SIZE - HEADER_SIZE:
+        body = data[pointer: pointer + PACKET_SIZE - HEADER_SIZE]
     else:
         is_final = 1
         body = data[pointer: len(data)]
 
-    pkt_size = len(body) + headers_size
-    headers_for_checksum = '{}\r{}\r{}\r{}\r{}\r{}\r\n'.format(255, pkt_size, seq_no, pkt_no, is_final, 0)
+    headers_for_checksum = '{}&{}&{}&{}&$'.format(255, seq_no, is_final, 0)
     checksum = calc_checksum(headers_for_checksum + body)
-    headers = '{}\r{}\r{}\r{}\r{}\r{}\r\n'.format(checksum, pkt_size, seq_no, pkt_no, is_final, 0)
+    headers = '{}&{}&{}&{}&$'.format(checksum, seq_no, is_final, 0)
     pkt = headers + body
 
     pointer = pointer + len(body)
-    print('Headers: {}'.format(headers.split('\r')))
+    print('Headers: {}'.format(headers.split('&')))
     print('Body: {}'.format(body))
 
     return pkt, pointer
@@ -139,20 +128,25 @@ def make_pkt(data, size, seq_no, pointer, pkt_no):
 
 def calc_checksum(data):
     data = data[3:]
-    all_sum = sum(bytearray(data, 'UTF-8'))
+    all_sum = 0
+    for s in data:
+        all_sum += ord(s)
     cutted_sum = all_sum & 0x000000FF
     remaining = all_sum >> 8
     while remaining != 0:
         cutted_sum += (remaining & 0x000000FF)
         while (cutted_sum & 0x0000FF00) != 0:
-            cutted_sum = (cutted_sum + ((cutted_sum & 0x0000FF00) >> 8))
+            next_byte = (cutted_sum & 0x0000FF00) >> 8
+            cutted_sum &= 0x000000FF
+            cutted_sum += next_byte
         remaining = remaining >> 8
-
-    print('cutted sum: {}'.format(cutted_sum))
-    return cutted_sum ^ 0xFF
+    cutted_sum = cutted_sum ^ 0xFF
+    cutted_sum = str(cutted_sum).zfill(3)
+    return cutted_sum
 
 
 def lose_the_packet():
-    return random.random() < PLP
+    return False
+    # TODO: return random.random() < PLP
 
 start('ss')
