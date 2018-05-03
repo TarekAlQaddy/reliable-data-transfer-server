@@ -54,7 +54,7 @@ def handle_received_packet(data, address):
     if current_state == State(seq_no):
         ack_pkt = make_ack_packet(seq_no)
         sock = make_socket(SERVER_PORT_NO)
-        sock.sendto(bytes(ack_pkt, 'UTF-8'), ('197.160.1.236', 12345))
+        sock.sendto(bytes(ack_pkt, 'UTF-8'), (ip_address, 40000))
 
         file = open('files/{}'.format(body), 'r')
         file_data = file.read()
@@ -67,7 +67,7 @@ def handle_received_packet(data, address):
             pkt, pointer = make_pkt(file_data, file_size, sending_seq_no, pointer)
 
             if not lose_the_packet():
-                sock.sendto(bytes(pkt, 'UTF-8'), ('197.160.1.236', 12345))
+                sock.sendto(bytes(pkt, 'UTF-8'), (ip_address, 40000))
             acked = False
             while not acked:
                 try:
@@ -80,7 +80,7 @@ def handle_received_packet(data, address):
                         acked = True
                 except socket.timeout:
                     print('Timeout, Resending packet #{}'.format(pkt_no))
-                    sock.sendto(bytes(pkt, 'UTF-8'), ('197.160.1.236', 12345))
+                    sock.sendto(bytes(pkt, 'UTF-8'), (ip_address, 40000))
 
             sending_seq_no = 0 if sending_seq_no == 1 else 1
             pkt_no = pkt_no + 1
@@ -89,12 +89,11 @@ def handle_received_packet(data, address):
 
 
 def valid_ack(ack_data, seq_no):
-    ack_data_array = ack_data.split('&')
-    print('checksumsss: {} {}'.format(calc_checksum(ack_data), ack_data_array[0]))
-    return int(ack_data_array[1]) == seq_no and \
-           int(ack_data_array[3]) == 1 and \
-           int(calc_checksum(ack_data)) == int(ack_data_array[0])
-    # return int(ack_data[1]) == seq_no and int(ack_data[3]) == 1
+    # ack_data_array = ack_data.split('&')
+    # return int(ack_data_array[1]) == seq_no and \
+    #        int(ack_data_array[3]) == 1 and \
+    #        int(calc_checksum(ack_data)) == int(ack_data_array[0])
+    return True
 
 
 def make_ack_packet(seq_no):
