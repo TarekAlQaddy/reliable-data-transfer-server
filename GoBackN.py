@@ -5,7 +5,7 @@ import threading
 from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet
 
 
-PACKET_SIZE = 50
+PACKET_SIZE = 200
 HEADER_SIZE = 12
 SERVER_PORT_NO = None
 PLP = None
@@ -70,7 +70,7 @@ def start_listening(main_socket, datagram_size):
         seq_no = (seq_no + 1) % MAX_SEQ_NO
 
     for i in range(WINDOW_SIZE):
-        thread = threading.Thread(target=send_packet, args=(main_socket, state['packets'][i], i, ('197.165.206.213', 12345)))
+        thread = threading.Thread(target=send_packet, args=(main_socket, state['packets'][i], i, address))
         thread.start()
         threads.append(thread)
 
@@ -89,22 +89,23 @@ def send_packet(sock, pkt, pkt_index, address):
     print('Sending seq no {}'.format(pkt.seq_no))
     main_lock.acquire()
     if state['packets'][pkt_index].status != 2:
-        sock.sendto(bytes(pkt.packet, 'UTF-8'), ('197.165.206.213', 12345))
+        sock.sendto(bytes(pkt.packet, 'UTF-8'), address)
     else:
         main_lock.release()
         return
     pkt.status = 1
     main_lock.release()
-    time.sleep(2)
+    time.sleep(0.1)
     print('Base {}'.format(state['base']))
     print('timout {}'.format(pkt_index))
     main_lock.acquire()
     if int(state['base']) == int(pkt_index) and state['packets'][pkt_index] != 2:  # still didn't acknowledge, Resend
         print('{} Same as base'.format(state['base']))
         for i in range(state['base'], state['base'] + WINDOW_SIZE):
-            thread = threading.Thread(target=send_packet, args=(sock, state['packets'][i], i, ('197.165.206.213', 12345)))
-            thread.start()
-            threads.append(thread)
+            if not lose_the_packet(PLP):
+                thread = threading.Thread(target=send_packet, args=(sock, state['packets'][i], i, address))
+                thread.start()
+                threads.append(thread)
     # print('{} status'.format(state['packets'][pkt_index].status))
 
     main_lock.release()

@@ -1,4 +1,5 @@
 import random
+from itertools import starmap, cycle
 
 
 class PacketState:
@@ -55,3 +56,24 @@ def make_ack_packet(seq_no):
 def lose_the_packet(PLP):
     # return False
     return random.random() < PLP
+
+
+def corrupt_pkt(pkt):
+    headers = pkt[0:12]
+    data = pkt[12:]
+    for i in range(12, len(pkt)):
+        if random.random() > 0.5:
+            data[i] &= 0x01010101
+
+    return headers + data
+
+
+def encrypt(message, key):
+    # convert to uppercase.
+    # strip out non-alpha characters.
+    message = filter(str.isalpha, message.upper())
+
+    # single letter encrpytion.
+    def enc(c, k): return chr(((ord(k) + ord(c) - 2 * ord('A')) % 26) + ord('A'))
+
+    return "".join(starmap(enc, zip(message, cycle(key))))

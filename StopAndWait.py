@@ -1,7 +1,7 @@
 import socket
 import os
 from enum import Enum
-from Helpers import calc_checksum, make_ack_packet, lose_the_packet
+from Helpers import calc_checksum, make_ack_packet, lose_the_packet, encrypt
 
 
 class State(Enum):
@@ -59,7 +59,7 @@ def handle_received_packet(data, address):
     if current_state == State(seq_no):
         ack_pkt = make_ack_packet(seq_no)
         sock = make_socket(SERVER_PORT_NO)
-        sock.sendto(bytes(ack_pkt, 'UTF-8'), ('197.165.206.213', 12345))
+        sock.sendto(bytes(ack_pkt, 'UTF-8'), address)
 
         file = open('files/{}'.format(body), 'r')
         file_data = file.read()
@@ -72,7 +72,7 @@ def handle_received_packet(data, address):
             pkt, pointer = make_pkt(file_data, file_size, sending_seq_no, pointer)
 
             if not lose_the_packet(PLP):
-                sock.sendto(bytes(pkt, 'UTF-8'), ('197.165.206.213', 12345))
+                sock.sendto(bytes(pkt, 'UTF-8'), address)
             acked = False
             while not acked:
                 try:
@@ -84,7 +84,7 @@ def handle_received_packet(data, address):
                         acked = True
                 except socket.timeout:
                     print('Timeout, Resending packet #{}'.format(pkt_no))
-                    sock.sendto(bytes(pkt, 'UTF-8'), ('197.165.206.213', 12345))
+                    sock.sendto(bytes(pkt, 'UTF-8'), address)
 
             sending_seq_no = 0 if sending_seq_no == 1 else 1
             pkt_no = pkt_no + 1
@@ -110,6 +110,7 @@ def make_pkt(data, size, seq_no, pointer):
     headers_for_checksum = '{}&{}&{}&{}&$'.format(255, str(seq_no).zfill(2), is_final, 0)
     checksum = calc_checksum(headers_for_checksum + body)
     headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, 0)
+    body = encrypt(body, 'g')
     pkt = headers + body
 
     pointer = pointer + len(body)

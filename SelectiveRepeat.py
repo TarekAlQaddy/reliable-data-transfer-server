@@ -3,14 +3,18 @@ import math
 import time
 import threading
 from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet
+import timeit
 
 
-PACKET_SIZE = 50
+PACKET_SIZE = 200
 HEADER_SIZE = 12
 SERVER_PORT_NO = None
 PLP = None
 WINDOW_SIZE = None
 MAX_SEQ_NO = None
+
+start_time = 0
+end_time = 0
 
 main_lock = threading.Lock()
 threads = []
@@ -48,6 +52,7 @@ def make_socket(port_no):
 
 def start_listening(main_socket, datagram_size):
     file_data, address = main_socket.recvfrom(datagram_size)
+    start_time = timeit.timeit()
 
     ack_pkt = make_ack_packet(0)
     main_socket.sendto(bytes(ack_pkt, 'UTF-8'), address)
@@ -88,14 +93,14 @@ def start_listening(main_socket, datagram_size):
 def send_packet(sock, pkt, pkt_index, address):
     print('Sending seq no {}'.format(pkt.seq_no))
     main_lock.acquire()
-    if state['packets'][pkt_index].status != 2:
+    if state['packets'][pkt_index].status != 2 and not lose_the_packet(PLP):
         sock.sendto(bytes(pkt.packet, 'UTF-8'), address)
     else:
         main_lock.release()
         return
     pkt.status = 1
     main_lock.release()
-    time.sleep(2)
+    time.sleep(0.1)
     main_lock.acquire()
     acked = True
     if int(state['packets'][pkt_index].status) != 2:  # still didn't acknowledge, Resend
@@ -111,6 +116,7 @@ def send_packet(sock, pkt, pkt_index, address):
 
 
 def handle_received_packet(sock, packet, address):
+    global start_time
     received_seq_no = packet.decode().split('&')[1]
     print('Handling seq no {}'.format(received_seq_no))
 
@@ -129,6 +135,7 @@ def handle_received_packet(sock, packet, address):
     main_lock.acquire()
     if state['acks_count'] == len(state['packets']) - 1:
         print('File Successfully Sent.')
+        print('\n\nEND TIME: {}\n\n'.format(timeit.timeit() - start_time))
     main_lock.release()
     check_if_advancing_needed(sock, address)
 
