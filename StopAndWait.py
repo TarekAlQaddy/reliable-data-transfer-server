@@ -1,7 +1,7 @@
 import socket
 import os
 from enum import Enum
-from Helpers import calc_checksum, make_ack_packet, lose_the_packet, encrypt
+from Helpers import calc_checksum, make_ack_packet, lose_the_packet, encrypt, print_progress_bar
 
 
 class State(Enum):
@@ -81,6 +81,7 @@ def handle_received_packet(data, address):
                     ack_data = ack.decode()
                     print('Sending Packet #{}'.format(pkt_no))
                     if valid_ack(ack_data, sending_seq_no):
+                        print_progress_bar(pointer, file_size)
                         acked = True
                 except socket.timeout:
                     print('Timeout, Resending packet #{}'.format(pkt_no))
@@ -89,7 +90,6 @@ def handle_received_packet(data, address):
             sending_seq_no = 0 if sending_seq_no == 1 else 1
             pkt_no = pkt_no + 1
         print('File is successfully sent\n\n')
-        # sock.close()
 
 
 def valid_ack(ack_data, seq_no):
@@ -110,7 +110,7 @@ def make_pkt(data, size, seq_no, pointer):
     headers_for_checksum = '{}&{}&{}&{}&$'.format(255, str(seq_no).zfill(2), is_final, 0)
     checksum = calc_checksum(headers_for_checksum + body)
     headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, 0)
-    body = encrypt(body, 'g')
+
     pkt = headers + body
 
     pointer = pointer + len(body)

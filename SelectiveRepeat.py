@@ -2,8 +2,7 @@ import socket
 import math
 import time
 import threading
-from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet
-import timeit
+from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet, print_progress_bar
 
 
 PACKET_SIZE = 200
@@ -12,9 +11,6 @@ SERVER_PORT_NO = None
 PLP = None
 WINDOW_SIZE = None
 MAX_SEQ_NO = None
-
-start_time = 0
-end_time = 0
 
 main_lock = threading.Lock()
 threads = []
@@ -52,7 +48,6 @@ def make_socket(port_no):
 
 def start_listening(main_socket, datagram_size):
     file_data, address = main_socket.recvfrom(datagram_size)
-    start_time = timeit.timeit()
 
     ack_pkt = make_ack_packet(0)
     main_socket.sendto(bytes(ack_pkt, 'UTF-8'), address)
@@ -116,9 +111,7 @@ def send_packet(sock, pkt, pkt_index, address):
 
 
 def handle_received_packet(sock, packet, address):
-    global start_time
     received_seq_no = packet.decode().split('&')[1]
-    print('Handling seq no {}'.format(received_seq_no))
 
     base_index = state['base']
     max_index = state['base'] + WINDOW_SIZE
@@ -126,16 +119,14 @@ def handle_received_packet(sock, packet, address):
     for i in range(base_index, max_index):
         if int(state['packets'][i].seq_no) == int(received_seq_no) and \
                         int(state['packets'][i].status) != 2 and valid_ack(packet):
-            print('Found index#{}'.format(i))
             state['packets'][i].status = 2
             state['acks_count'] += 1
+            print_progress_bar(state['acks_count'], len(state['packets']))
             break
     main_lock.release()
-    print('\nAcks count: {}\n'.format(state['acks_count']))
     main_lock.acquire()
     if state['acks_count'] == len(state['packets']) - 1:
         print('File Successfully Sent.')
-        print('\n\nEND TIME: {}\n\n'.format(timeit.timeit() - start_time))
     main_lock.release()
     check_if_advancing_needed(sock, address)
 
@@ -146,23 +137,18 @@ def valid_ack(packet):
 
 def check_if_advancing_needed(sock, address):
     main_lock.acquire()
-    print('Entered advancing')
-    print('base Now: {}'.format(state['base']))
     count = 0
     while state['packets'][state['base']].status == 2 and count < WINDOW_SIZE \
             and state['base'] + WINDOW_SIZE < len(state['packets']):
-        print('Advancing found')
         count += 1
         state['base'] += 1
     main_lock.release()
     start = state['base']
     end = state['base'] + WINDOW_SIZE
     for i in range(start, end):
-        # print(state['packets'][i].status)
         main_lock.acquire()
         if state['packets'][i].status == 0:
             main_lock.release()
-            print('New packets being sent {}'.format(i))
             thread = threading.Thread(target=send_packet, args=(sock, state['packets'][i], i, address))
             thread.start()
             threads.append(thread)
@@ -171,8 +157,6 @@ def check_if_advancing_needed(sock, address):
 
 
 def check_if_thread_finished():
-    print('Threads Count: {}'.format(len(threads)))
-    print('Inactive Count: {}'.format(threading.active_count()))
     inactive = []
     for th in threads:
         if not th.is_alive():
@@ -181,6 +165,3 @@ def check_if_thread_finished():
 
     for i in inactive:
         i.join()
-
-    print('Threads Count: {}'.format(len(threads)))
-    print('Inactive Count: {}'.format(threading.active_count()))

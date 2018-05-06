@@ -2,7 +2,7 @@ import socket
 import math
 import time
 import threading
-from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet
+from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet, print_progress_bar
 
 
 PACKET_SIZE = 200
@@ -86,7 +86,6 @@ def start_listening(main_socket, datagram_size):
 
 
 def send_packet(sock, pkt, pkt_index, address):
-    print('Sending seq no {}'.format(pkt.seq_no))
     main_lock.acquire()
     if state['packets'][pkt_index].status != 2:
         sock.sendto(bytes(pkt.packet, 'UTF-8'), address)
@@ -96,17 +95,13 @@ def send_packet(sock, pkt, pkt_index, address):
     pkt.status = 1
     main_lock.release()
     time.sleep(0.1)
-    print('Base {}'.format(state['base']))
-    print('timout {}'.format(pkt_index))
     main_lock.acquire()
     if int(state['base']) == int(pkt_index) and state['packets'][pkt_index] != 2:  # still didn't acknowledge, Resend
-        print('{} Same as base'.format(state['base']))
         for i in range(state['base'], state['base'] + WINDOW_SIZE):
             if not lose_the_packet(PLP):
                 thread = threading.Thread(target=send_packet, args=(sock, state['packets'][i], i, address))
                 thread.start()
                 threads.append(thread)
-    # print('{} status'.format(state['packets'][pkt_index].status))
 
     main_lock.release()
     return
@@ -114,14 +109,12 @@ def send_packet(sock, pkt, pkt_index, address):
 
 def handle_received_packet(sock, packet, address):
     received_seq_no = packet.decode().split('&')[1]
-    print('Handling seq no {}'.format(received_seq_no))
     main_lock.acquire()
     if int(state['packets'][state['base']].seq_no) == int(received_seq_no):
-        print('FOUND {}'.format(received_seq_no))
         state['packets'][state['base']].status = 2
         state['acks_count'] += 1
         state['base'] += 1
-    print('Base now: {}'.format(state['base']))
+        print_progress_bar(state['acks_count'], len(state['packets']))
     main_lock.release()
     main_lock.acquire()
     base = state['base']
@@ -133,7 +126,6 @@ def handle_received_packet(sock, packet, address):
         threads.append(thread)
     else:
         main_lock.release()
-    print('\nAcks count: {}\n'.format(state['acks_count']))
     main_lock.acquire()
     if state['acks_count'] == len(state['packets']) - 1:
         print('File Successfully Sent.')
@@ -142,13 +134,11 @@ def handle_received_packet(sock, packet, address):
 
 
 def valid_ack(packet):
-    # print('CHECKSUM: {}'.format(packet))
     return calc_checksum(packet.decode()) == packet.decode().split('&')[0]
 
 
 def check_if_thread_finished():
-    print('Threads Count: {}'.format(len(threads)))
-    print('Inactive Count: {}'.format(threading.active_count()))
+
     inactive = []
     for th in threads:
         if not th.is_alive():
@@ -157,6 +147,3 @@ def check_if_thread_finished():
 
     for i in inactive:
         i.join()
-
-    print('Threads Count: {}'.format(len(threads)))
-    print('Inactive Count: {}'.format(threading.active_count()))
