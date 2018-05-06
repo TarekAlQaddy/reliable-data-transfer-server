@@ -14,21 +14,22 @@ class PacketState:
 
     @staticmethod
     def make_pkt(data, seq_no, is_final):
-        checksum_headers = '{}&{}&{}&{}&$'.format(255, seq_no, is_final, 0)
+        checksum_headers = '{}&{}&{}&{}&$'.format(255, str(seq_no).zfill(2), is_final, 0)
         checksum = calc_checksum(checksum_headers + data)
-        headers = '{}&{}&{}&{}&$'.format(checksum, seq_no, is_final, 0)
+        headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, 0)
         return headers + data
 
 
 saved_clients = {}
-PACKET_SIZE = 30
-HEADER_SIZE = 11
+PACKET_SIZE = 50
+HEADER_SIZE = 12
 SERVER_PORT_NO = 12345
 PLP = 0.2
-WINDOW_SIZE = 5
-MAX_SEQ_NO = 15
+WINDOW_SIZE = 3
+MAX_SEQ_NO = 9
 
 main_lock = threading.Lock()
+threads = []
 
 state = {
     'base': 0,
@@ -77,9 +78,10 @@ def start_listening(main_socket, datagram_size):
         seq_no = (seq_no + 1) % MAX_SEQ_NO
 
     for i in range(WINDOW_SIZE):
-        print('Sending {}'.format(i))
         thread = threading.Thread(target=send_packet, args=(main_socket, state['packets'][i], i, address))
         thread.start()
+        threads.append(thread)
+
     print('Sent first window size')
 
     while True:
@@ -87,73 +89,105 @@ def start_listening(main_socket, datagram_size):
         print('Received ack {}'.format(rPkt.decode()))
         thread = threading.Thread(target=handle_received_packet, args=(main_socket, rPkt, rAddress))
         thread.start()
+        threads.append(thread)
+        check_if_thread_finished()
 
 
 def send_packet(sock, pkt, pkt_index, address):
     print('Sending seq no {}'.format(pkt.seq_no))
-    sock.sendto(bytes(pkt.packet, 'UTF-8'), address)
     main_lock.acquire()
+    if state['packets'][pkt_index].status != 2:
+        sock.sendto(bytes(pkt.packet, 'UTF-8'), address)
+    else:
+        main_lock.release()
+        return
     pkt.status = 1
     main_lock.release()
-    time.sleep(4)
+    time.sleep(2)
     main_lock.acquire()
     acked = True
-    if state['packets'][pkt_index].status == 1:  # still didn't acknowledge, Resend
+    if int(state['packets'][pkt_index].status) != 2:  # still didn't acknowledge, Resend
         acked = False
         main_lock.release()
-        send_packet(sock, pkt, pkt_index, address)
+        thread = threading.Thread(target=send_packet, args=(sock, pkt, pkt_index, address))
+        thread.start()
+        threads.append(thread)
+        # send_packet(sock, pkt, pkt_index, address)
     if acked:
         main_lock.release()
+    return
 
 
 def handle_received_packet(sock, packet, address):
     received_seq_no = packet.decode().split('&')[1]
     print('Handling seq no {}'.format(received_seq_no))
-    main_lock.acquire()
+
     base_index = state['base']
     max_index = state['base'] + WINDOW_SIZE
-    temp_pkt = None
-
+    main_lock.acquire()
     for i in range(base_index, max_index):
         if int(state['packets'][i].seq_no) == int(received_seq_no) and \
-                        int(state['packets'][i].status) != 2:
+                        int(state['packets'][i].status) != 2 and valid_ack(packet):
             print('Found index#{}'.format(i))
-            temp_pkt = state['packets'][i]
+            state['packets'][i].status = 2
+            state['acks_count'] += 1
             break
-    if temp_pkt:
-        temp_pkt.status = 2
-        state['acks_count'] += 1
+    main_lock.release()
+    print('\nAcks count: {}\n'.format(state['acks_count']))
+    main_lock.acquire()
     if state['acks_count'] == len(state['packets']) - 1:
         print('File Successfully Sent.')
     main_lock.release()
     check_if_advancing_needed(sock, address)
 
 
+def valid_ack(packet):
+    # print('CHECKSUM: {}'.format(packet))
+    return calc_checksum(packet.decode()) == packet.decode().split('&')[0]
+
+
 def check_if_advancing_needed(sock, address):
     main_lock.acquire()
     print('Entered advancing')
     print('base Now: {}'.format(state['base']))
-    while state['packets'][state['base']].status == 2 and state['base'] + WINDOW_SIZE < len(state['packets']):
+    count = 0
+    while state['packets'][state['base']].status == 2 and count < WINDOW_SIZE \
+            and state['base'] + WINDOW_SIZE < len(state['packets']):
         print('Advancing found')
+        count += 1
         state['base'] += 1
+    main_lock.release()
     start = state['base']
     end = state['base'] + WINDOW_SIZE
     for i in range(start, end):
-        print(state['packets'][i].status)
+        # print(state['packets'][i].status)
+        main_lock.acquire()
         if state['packets'][i].status == 0:
+            main_lock.release()
             print('New packets being sent {}'.format(i))
             thread = threading.Thread(target=send_packet, args=(sock, state['packets'][i], i, address))
             thread.start()
-    main_lock.release()
+            threads.append(thread)
+        else:
+            main_lock.release()
 
 
-# def valid_ack(ack_data, seq_no):
-#     ack_data_array = ack_data.split('&')
-#     print('checksumsss: {} {}'.format(calc_checksum(ack_data), ack_data_array[0]))
-#     return int(ack_data_array[1]) == seq_no and \
-#            int(ack_data_array[3]) == 1 and \
-#            int(calc_checksum(ack_data)) == int(ack_data_array[0])
-#     # return int(ack_data[1]) == seq_no and int(ack_data[3]) == 1
+def check_if_thread_finished():
+    print('Threads Count: {}'.format(len(threads)))
+    print('Inactive Count: {}'.format(threading.active_count()))
+    inactive = []
+    for th in threads:
+        if not th.is_alive():
+            inactive.append(th)
+            threads.remove(th)
+
+    for i in inactive:
+        i.join()
+
+    print('Threads Count: {}'.format(len(threads)))
+    print('Inactive Count: {}'.format(threading.active_count()))
+    # for th in inactive:
+    #     th.join()
 
 
 def make_ack_packet(seq_no):
@@ -161,28 +195,8 @@ def make_ack_packet(seq_no):
     is_ack = 1
     checksum = calc_checksum('{}&{}&{}&{}&$'.format(255, seq_no, is_final, is_ack))
     print('ack checksum {}'.format(checksum))
-    headers = '{}&{}&{}&{}&$'.format(checksum, seq_no, is_final, is_ack)
+    headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, is_ack)
     return headers
-
-
-def make_pkt(data, size, seq_no, pointer):
-    is_final = 0
-    if size - pointer > PACKET_SIZE - HEADER_SIZE:
-        body = data[pointer: pointer + PACKET_SIZE - HEADER_SIZE]
-    else:
-        is_final = 1
-        body = data[pointer: len(data)]
-
-    headers_for_checksum = '{}&{}&{}&{}&$'.format(255, seq_no, is_final, 0)
-    checksum = calc_checksum(headers_for_checksum + body)
-    headers = '{}&{}&{}&{}&$'.format(checksum, seq_no, is_final, 0)
-    pkt = headers + body
-
-    pointer = pointer + len(body)
-    print('Headers: {}'.format(headers.split('&')))
-    print('Body: {}'.format(body))
-
-    return pkt, pointer
 
 
 def calc_checksum(data):
