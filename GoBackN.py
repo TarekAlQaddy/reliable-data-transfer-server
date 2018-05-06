@@ -1,32 +1,16 @@
 import socket
-import random
 import math
 import time
 import threading
+from Helpers import PacketState, calc_checksum, lose_the_packet, make_ack_packet
 
 
-class PacketState:
-    def __init__(self, seq_no, status, is_final, data):
-        self.seq_no = seq_no
-        self.status = status
-        self.data = data
-        self.packet = PacketState.make_pkt(data, seq_no, is_final)
-
-    @staticmethod
-    def make_pkt(data, seq_no, is_final):
-        checksum_headers = '{}&{}&{}&{}&$'.format(255, str(seq_no).zfill(2), is_final, 0)
-        checksum = calc_checksum(checksum_headers + data)
-        headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, 0)
-        return headers + data
-
-
-saved_clients = {}
 PACKET_SIZE = 50
 HEADER_SIZE = 12
-SERVER_PORT_NO = 12345
-PLP = 0.2
-WINDOW_SIZE = 3
-MAX_SEQ_NO = 3
+SERVER_PORT_NO = None
+PLP = None
+WINDOW_SIZE = None
+MAX_SEQ_NO = None
 
 main_lock = threading.Lock()
 threads = []
@@ -44,6 +28,14 @@ state = {
 
 
 def start(filename):
+    global SERVER_PORT_NO, WINDOW_SIZE, MAX_SEQ_NO, PLP
+    file = open(filename, 'r')
+    configs = file.read()
+    configs = configs.split('\n')
+    SERVER_PORT_NO = int(configs[0].split(':')[1].strip())
+    WINDOW_SIZE = int(configs[1].split(':')[1].strip())
+    MAX_SEQ_NO = WINDOW_SIZE
+    PLP = float(configs[2].split(':')[1].strip())
     main_socket = make_socket(SERVER_PORT_NO)
     start_listening(main_socket, PACKET_SIZE)
 
@@ -167,41 +159,3 @@ def check_if_thread_finished():
 
     print('Threads Count: {}'.format(len(threads)))
     print('Inactive Count: {}'.format(threading.active_count()))
-    # for th in inactive:
-    #     th.join()
-
-
-def make_ack_packet(seq_no):
-    is_final = 0
-    is_ack = 1
-    checksum = calc_checksum('{}&{}&{}&{}&$'.format(255, seq_no, is_final, is_ack))
-    print('ack checksum {}'.format(checksum))
-    headers = '{}&{}&{}&{}&$'.format(checksum, str(seq_no).zfill(2), is_final, is_ack)
-    return headers
-
-
-def calc_checksum(data):
-    data = data[3:]
-    all_sum = 0
-    for s in data:
-        all_sum += ord(s)
-    cutted_sum = all_sum & 0x000000FF
-    remaining = all_sum >> 8
-    while remaining != 0:
-        cutted_sum += (remaining & 0x000000FF)
-        while (cutted_sum & 0x0000FF00) != 0:
-            next_byte = (cutted_sum & 0x0000FF00) >> 8
-            cutted_sum &= 0x000000FF
-            cutted_sum += next_byte
-        remaining = remaining >> 8
-    cutted_sum = cutted_sum ^ 0xFF
-    cutted_sum = str(cutted_sum).zfill(3)
-    return cutted_sum
-
-
-def lose_the_packet():
-    return False
-    # TODO: return random.random() < PLP
-
-
-start('ss')

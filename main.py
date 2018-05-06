@@ -1,32 +1,24 @@
-import socket
+import sys
+import SelectiveRepeat
+import StopAndWait
+import GoBackN
 
-ip = ""
-port = 40000
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def print_usage():
+    print("""\nUsage: main.py option config-file-name\n
+    option:\n-st:\tstop and wait\n-sr:\tselective repeat\n-go:\tgo back N\n""")
 
-sock.bind((ip, port))
-# sock.listen(5)
-# while True:
-#     data, address = sock.recvfrom(1024)
-#     print(data, address)
-sock.sendto(bytes('2\r5\r0\r0\r1\r0\r\na.txt', 'UTF-8'), ('localhost', 12345))
-while True:
-    data, addr = sock.recvfrom(30)
-    sock.sendto(bytes('2\r5\r{}\r0\r1\r1\r\n'.format(data.decode().split('\r')[2]), 'UTF-8'), ('localhost', 12345))
-    print(data, addr)
 
-# sock.bind(('', port))
-
-# while True:
-#     data, addr = sock.recvfrom(30)
-#     sock.sendto(bytes('2\r5\r0\r0\r1\r1\r\n', 'UTF-8'), ('localhost', 12345))
-#     print(data, addr)
-#
-#     data, addr = sock.recvfrom(30)
-#     sock.sendto(bytes('2\r5\r1\r0\r1\r1\r\n', 'UTF-8'), ('localhost', 12345))
-#     print(data, addr)
-
-# sock.sendto(bytes('2\r5\r0\r0\r1\r1\r\n', 'UTF-8'), ('localhost', 12345))
-# sock.sendto(bytes('two', 'UTF-8'), ('localhost', 12345))
-# sock.sendto(bytes('three', 'UTF-8'), ('localhost', 12345))
+if len(sys.argv) < 3:
+    print_usage()
+elif len(sys.argv) == 3:
+    method = sys.argv[1]
+    file_name = sys.argv[2]
+    if method == '-sr':
+        SelectiveRepeat.start(file_name)
+    elif method == '-st':
+        StopAndWait.start(file_name)
+    elif method == '-go':
+        GoBackN.start(file_name)
+else:
+    print_usage()
